@@ -11,6 +11,9 @@ fn main() -> io::Result<()> {
         // TUN Frame Format: flags: 2 bytes; proto: 2 bytes;
         let flags = u16::from_be_bytes([buffer[0], buffer[1]]);
         let proto = u16::from_be_bytes([buffer[2], buffer[3]]);
+        if proto != 0x0800 {
+            continue;           // no ipv4
+        }
         eprintln!(
             "read {} bytes (flags: {:x}, proto: {:x}): {:x?}",
             nbytes - 4,
