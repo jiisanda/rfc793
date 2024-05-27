@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 
@@ -15,4 +15,5 @@ sudo setcap cap_net_admin=eip "$CARGO_TARGET_DIR"/release/rfc793
 RUST_PROCESS_ID=$!
 sudo ip addr add 192.168.0.1/24 dev tun0
 sudo ip link set up dev tun0
+trap "kill $RUST_PROCESS_ID" INT TERM
 wait $RUST_PROCESS_ID
