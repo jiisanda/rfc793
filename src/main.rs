@@ -21,7 +21,7 @@ fn main() -> io::Result<()> {
                 let dest = p.destination_addr();
                 let proto = p.protocol();
                 eprintln!(
-                    "{} → {} {:?}b of protocol {:}",
+                    "{} → {} {:?}b of protocol {:?}",
                     src,
                     dest,
                     p.payload_len(),
