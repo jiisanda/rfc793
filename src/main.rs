@@ -35,21 +35,13 @@ fn main() -> io::Result<()> {
                     continue;
                 }
 
-                match etherparse::TcpHeaderSlice::from_slice(&buffer[4+iph.slice().len()..]) {
+                match etherparse::TcpHeaderSlice::from_slice(&buffer[4+iph.slice().len()..n_bytes]) {
                     Ok(tcph) => {
                         let datai = 4 + iph.slice().len() + tcph.slice().len();
                         connection.entry(Quad {
                             src: (src, tcph.source_port()),
                             dest: (dest, tcph.destination_port()),
-                        }).or_default().on_packet(iph, tcph, &buffer[datai..] );
-                        // (src_ip, src_port, dest_ip, dest_port) -> quad required to identify a single connection
-                        eprintln!(
-                            "{} → {} {:?}b of tcp to port {:?}",
-                            src,
-                            dest,
-                            tcph.slice().len(),
-                            tcph.destination_port()
-                        )
+                        }).or_default().on_packet(iph, tcph, &buffer[datai..n_bytes] );
                     }
                     Err(e) => {
                         eprintln!("ignoring wired tcp packet {:?}", e)

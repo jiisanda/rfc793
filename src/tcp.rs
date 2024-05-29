@@ -8,6 +8,8 @@ impl Default for State {
     }
 }
 
+
+// here <'a> is the lifetime of the packet itself
 impl State  {
     pub fn on_packet<'a>(
         &mut self,
