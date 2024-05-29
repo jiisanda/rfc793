@@ -9,7 +9,12 @@ impl Default for State {
 }
 
 impl State  {
-    pub fn on_packet(&mut self, iph: etherparse::Ipv4HeaderSlice, tcph: etherparse::TcpHeaderSlice, data: &[u8]) {
+    pub fn on_packet<'a>(
+        &mut self,
+        iph: etherparse::Ipv4HeaderSlice<'a>,
+        tcph: etherparse::TcpHeaderSlice<'a>,
+        data: &'a [u8],
+    ) {
         eprintln!(
             "{}:{} → {}:{} {:?}b of tcp",
             iph.source_addr(),
