@@ -1,9 +1,19 @@
-use std::io;
+mod tcp;
 
-use tun_tap::Mode;
+use std::collections::HashMap;
+use std::io;
+use std::net::Ipv4Addr;
+
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+struct Quad {
+    src: (Ipv4Addr, u16),
+    dest: (Ipv4Addr, u16)
+}
 
 fn main() -> io::Result<()> {
-    let i_face = tun_tap::Iface::new("tun0", Mode::Tun)?;
+    let mut connection: HashMap<Quad, tcp::State> = Default::default();
+    let i_face = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
     let mut buffer = [0u8; 1504];
     loop {
         let n_bytes = i_face.recv(&mut buffer[..])?;
@@ -16,17 +26,35 @@ fn main() -> io::Result<()> {
         }
 
         match etherparse::Ipv4HeaderSlice::from_slice(&buffer[4..n_bytes]) {
-            Ok(p) => {
-                let src = p.source_addr();
-                let dest = p.destination_addr();
-                let proto = p.protocol();
-                eprintln!(
-                    "{} → {} {:?}b of protocol {:?}",
-                    src,
-                    dest,
-                    p.payload_len(),
-                    proto
-                );
+            Ok(iph) => {
+                let src = iph.source_addr();
+                let dest = iph.destination_addr();
+
+                if iph.protocol() != etherparse::IpNumber(0x06) {
+                    // not tcp
+                    continue;
+                }
+
+                match etherparse::TcpHeaderSlice::from_slice(&buffer[4+iph.slice().len()..]) {
+                    Ok(tcph) => {
+                        let datai = 4 + iph.slice().len() + tcph.slice().len();
+                        connection.entry(Quad {
+                            src: (src, tcph.source_port()),
+                            dest: (dest, tcph.destination_port()),
+                        }).or_default().on_packet(iph, tcph, &buffer[datai..] );
+                        // (src_ip, src_port, dest_ip, dest_port) -> quad required to identify a single connection
+                        eprintln!(
+                            "{} → {} {:?}b of tcp to port {:?}",
+                            src,
+                            dest,
+                            tcph.slice().len(),
+                            tcph.destination_port()
+                        )
+                    }
+                    Err(e) => {
+                        eprintln!("ignoring wired tcp packet {:?}", e)
+                    }
+                }
             },
             Err(e) => {
                 eprintln!("ignoring wired packet {:?}", e)
