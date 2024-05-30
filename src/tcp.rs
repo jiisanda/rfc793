@@ -1,10 +1,11 @@
-pub(crate) struct State {
-
+pub(crate) enum State {
+    Closed,
+    Listen
 }
 
 impl Default for State {
     fn default() -> Self {
-        State {}        // todo!
+        State::Closed        // todo!
     }
 }
 
