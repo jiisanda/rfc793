@@ -13,7 +13,7 @@ struct Quad {
 
 fn main() -> io::Result<()> {
     let mut connection: HashMap<Quad, tcp::State> = Default::default();
-    let i_face = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
+    let mut i_face = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
     let mut buffer = [0u8; 1504];
     loop {
         let n_bytes = i_face.recv(&mut buffer[..])?;
@@ -41,7 +41,7 @@ fn main() -> io::Result<()> {
                         connection.entry(Quad {
                             src: (src, tcph.source_port()),
                             dest: (dest, tcph.destination_port()),
-                        }).or_default().on_packet(iph, tcph, &buffer[datai..n_bytes] );
+                        }).or_default().on_packet(&mut i_face, iph, tcph, &buffer[datai..n_bytes])?;
                     }
                     Err(e) => {
                         eprintln!("ignoring wired tcp packet {:?}", e)
