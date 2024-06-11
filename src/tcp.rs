@@ -3,7 +3,7 @@ use std::io;
 enum State {
     Closed,
     Listen,
-    // SyncRcvd,
+    SynRcvd,
     // Estab,
 }
 
@@ -26,13 +26,13 @@ pub struct Connection {
 /// 4 - future sequence numbers which are not yet allowed
 /// ```
 struct SendSequenceSpace {
-    una: usize,         /// send acknowledge
-    nxt: usize,         /// send next
-    wnd: usize,         /// send window
-    up: bool,           /// send urgent pointer
-    wl1: usize,         /// segment sequence number used for last window update
-    wl2: usize,         /// segment ack number used for last window update
-    iss: usize,         /// initial send sequence number
+    una: u32,         // send acknowledge
+    nxt: u32,         // send next
+    wnd: u16,         // send window
+    up: bool,           // send urgent pointer
+    wl1: usize,         // segment sequence number used for last window update
+    wl2: usize,         // segment ack number used for last window update
+    iss: u32,         // initial send sequence number
 }
 
 /// State of Receive Sequence Space (RFC 793-S3.2 F5)
@@ -47,80 +47,105 @@ struct SendSequenceSpace {
 /// 3 - future sequence numbers which are not yet allowed
 /// ```
 struct ReceiveSequenceSpace {
-    nxt: usize,         /// receive next
-    wnd: usize,         /// receive window
-    up: bool,           /// receive urgent pointer
-    irs: usize,         /// initial receive sequence number
-}
-
-impl Default for State {
-    fn default() -> Self {
-        // State::Closed        // todo!
-        Connection {
-            state: State::Listen,
-        }
-    }
+    nxt: u32,         // receive next
+    wnd: u16,         // receive window
+    up: bool,           // receive urgent pointer
+    irs: u32,         // initial receive sequence number
 }
 
 
 // here <'a> is the lifetime of the packet itself
-impl State  {
+impl Connection  {
+    pub fn accept<'a>(
+        nic: &mut tun_tap::Iface,
+        iph: etherparse::Ipv4HeaderSlice<'a>,
+        tcph: etherparse::TcpHeaderSlice<'a>,
+        data: &'a [u8],
+    ) -> io::Result<Option<Self>> {
+        let mut buff = [0u8; 1500];
+        // let mut unwritten = &mut buff[..];
+        if !tcph.syn() {
+            // only syn packet is expected
+            return Ok(None);
+        }
+
+        // new state for new connection
+        let iss = 0;
+        let mut c = Connection {
+            state: State::SynRcvd,
+            send: SendSequenceSpace {
+                // decide on things to send
+                iss,
+                una: iss,
+                nxt: iss + 1,
+                wnd: 10,
+                up: false,
+                wl1: 0,
+                wl2: 0,
+            },
+            rcv: ReceiveSequenceSpace {
+                // keep track of sender info
+                nxt: tcph.sequence_number() + 1,
+                wnd: tcph.window_size(),
+                up: false,
+                irs: tcph.sequence_number(),
+            }
+        };
+
+        // need to start establishing connection
+        let mut syn_ack = etherparse::TcpHeader::new(
+            tcph.destination_port(),
+            tcph.source_port(),
+            c.send.iss,
+            c.send.wnd,
+        );
+        syn_ack.acknowledgment_number = c.rcv.nxt;       // we are expecting the next syn
+        syn_ack.syn = true;
+        syn_ack.ack = true;
+        // wrapping it into IP packet, as we are sending it back to them
+        let mut ip = etherparse::Ipv4Header::new(
+            syn_ack.header_len() as u16,
+            64,
+            etherparse::IpNumber::TCP,
+            [
+                iph.destination()[0],
+                iph.destination()[1],
+                iph.destination()[2],
+                iph.destination()[3],
+            ],
+            [
+                iph.source()[0],
+                iph.source()[1],
+                iph.source()[2],
+                iph.source()[3],
+            ],
+        );
+
+        eprintln!("got ip headers: \n {:02x?}", iph);
+        eprintln!("got tcp header: \n {:02x?}", tcph);
+
+        // headers
+        let unwritten = {
+            let mut unwritten = &mut buff[..];
+            ip.unwrap().write(&mut unwritten).expect("TODO: panic message");
+            syn_ack.write(&mut unwritten).expect("TODO: panic message");
+            unwritten.len()
+        };
+
+        eprintln!("responding with {:0x?}", &buff[..buff.len() - unwritten]);
+
+       nic.send(&buff[..unwritten])?;
+        Ok(Some(c))
+    }
+
     pub fn on_packet<'a>(
         &mut self,
         nic: &mut tun_tap::Iface,
         iph: etherparse::Ipv4HeaderSlice<'a>,
         tcph: etherparse::TcpHeaderSlice<'a>,
         data: &'a [u8],
-    ) -> io::Result<usize>{
-        let mut buff = [0u8; 1500];
-        // let mut unwritten = &mut buff[..];
-        match *self{
-            State::Closed => {
-                return Ok(0);
-            }
-            State::Listen => {
-                if !tcph.syn() {
-                    // only syn packet is expected
-                    return Ok(0);
-                }
+    ) -> io::Result<()> {
 
-                // need to start establishing connection
-                let mut syn_ack = etherparse::TcpHeader::new(
-                    tcph.destination_port(),
-                    tcph.source_port(),
-                    0,
-                    0
-                );
-                syn_ack.syn = true;
-                syn_ack.ack = true;
-                // wrapping it into IP packet, as we are sending it back to them
-                let mut ip = etherparse::Ipv4Header::new(
-                    syn_ack.header_len() as u16,
-                    64,
-                    etherparse::IpNumber::TCP,
-                    [
-                        iph.destination()[0],
-                        iph.destination()[1],
-                        iph.destination()[2],
-                        iph.destination()[3],
-                    ],
-                    [
-                        iph.source()[0],
-                        iph.source()[1],
-                        iph.source()[2],
-                        iph.source()[3],
-                    ],
-                );
-
-                // headers
-                let unwritten = {
-                    let mut unwritten = &mut buff[..];
-                    ip.unwrap().write(&mut unwritten).expect("TODO: panic message");
-                    syn_ack.write(&mut unwritten).expect("TODO: panic message");
-                    unwritten.len()
-                };
-                nic.send(&buff[..unwritten])
-            }
-        }
+        unimplemented!();
     }
 }
