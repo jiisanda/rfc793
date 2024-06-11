@@ -37,11 +37,27 @@ fn main() -> io::Result<()> {
 
                 match etherparse::TcpHeaderSlice::from_slice(&buffer[4+iph.slice().len()..n_bytes]) {
                     Ok(tcph) => {
+                        use std::collections::hash_map::Entry;
                         let datai = 4 + iph.slice().len() + tcph.slice().len();
-                        connection.entry(Quad {
+                        match connection.entry(Quad {
                             src: (src, tcph.source_port()),
                             dest: (dest, tcph.destination_port()),
-                        }).or_default().on_packet(&mut i_face, iph, tcph, &buffer[datai..n_bytes])?;
+                        }) {
+                            Entry::Occupied(mut c) => {
+                                c.get_mut().
+                                    on_packet(&mut i_face, iph, tcph, &buffer[datai..n_bytes])?;
+                            },
+                            Entry::Vacant(e) => {
+                                if let Some(c) = tcp::Connection::accept(
+                                    &mut i_face,
+                                    iph,
+                                    tcph,
+                                    &buffer[datai..n_bytes]
+                                )? {
+                                    e.insert(c);
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("ignoring wired tcp packet {:?}", e)
